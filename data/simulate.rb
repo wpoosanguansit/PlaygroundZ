@@ -47,8 +47,8 @@ puts "\n\n"
 
 r 			= Random.new
 
-startX 		= 22 #r.rand(1..x-1)
-startY 		= 3  #r.rand(1..y-1)
+startX 		= r.rand(1..x-1)
+startY 		= r.rand(1..y-1)
 
 until (array[startY - 1][startX - 1] != '#')
 	startX 	= r.rand(1..x-1) 
@@ -87,13 +87,13 @@ begin
 			puts "output: #{line}"
 			if line.include?("The agent seems to have completed the grid")
 				done 	= 1
-			elsif line.include?("U")
+			elsif line.eql?("U")
 				current = Point.new(current.x, current.y - 1)
-			elsif line.include?("D")
+			elsif line.eql?("D")
 				current = Point.new(current.x, current.y + 1)
-			elsif line.include?("L")
+			elsif line.eql?("L")
 				current = Point.new(current.x - 1, current.y)
-			elsif line.include?("R")
+			elsif line.eql?("R")
 				current = Point.new(current.x + 1, current.y)
 			end
 			puts "next position is: " 	<< current.to_s

@@ -55,11 +55,7 @@ output: KAB
 https://www.digitalocean.com/community/tutorials/how-to-install-java-on-ubuntu-with-apt-get  
 2. Install Scala and sbt
   
-on Mac OS: 
-
-http://biercoff.com/how-to-install-scala-on-mac-os/
-
-on Ubuntu:
+on Ubuntu
   
 \#!/bin/sh  
 \# one way (older scala version will be installed)  
@@ -79,9 +75,7 @@ sudo apt-get install sbt
   
 3. Build the project  
   
-Go to the project directory in the console and issue the command 
-
-> sbt assembly  
+Go to the project directory in the console and issue the command sbt assembly  
 
 # To run the program
 
@@ -90,31 +84,33 @@ Go to the project directory in the console and issue the command
 1.1 create the jar with sbt assembly - sbt assembly in sbt console  
 2. Run the jar file by:  
   
-java -jar target/scala-2.11/solution.jar  
+java -jar target/scala-2.13/solution.jar  -Dlog4j.configuration=file:src/main/resources/log4j.properties
   
 2.1 Run in the console  
   
 Move to the project in the console.  And issue command  
   
-> sbt console  
+>sbt console  
   
 Once in the console, you should see:  
   
 [info]  
-import scalaz.zio._  
-import cats.implicits._  
-import eu.timepit.refined._  
-import java.io.IOException  
-import scalaz.zio.clock.Clock  
-import eu.timepit.refined.api.Refined  
-import com.playground.strategy.Default._  
-import scalaz.zio.console.{Console, getStrLn, putStrLn}  
-import com.playground.strategy.Common.{Env, isCapitalLetter}   
-  
-Welcome to Scala version 2.11.5 (Java HotSpot(TM) 64-Bit Server VM, Java 1.7.0_40).  
-Type in expressions to have them evaluated.  
-Type :help for more information.  
-  
+import zio._
+import java.io.IOException
+import zio.console.{getStrLn, putStrLn}
+import com.playground.strategy.Common._
+import com.playground.strategy.Default._
+import com.playground.strategy.Common.{Env, isCapitalLetter}
+
+[info] welcome to sbt 1.3.12 (Oracle Corporation Java 13.0.2)
+[info] loading global plugins from /Users/watt/.sbt/1.0/plugins
+[info] set current project to data (in build file:/Users/watt/Desktop/PlaygroundZ/data/)
+[info] Non-compiled module 'compiler-bridge_2.12' for Scala 2.12.10. Compiling...
+[info]   Compilation completed in 4.824s.
+[info] Starting scala interpreter...
+Welcome to Scala 2.12.10 (OpenJDK 64-Bit Server VM, Java 13.0.2).
+Type in expressions for evaluation. Or try :help.
+
 scala>
   
 In the console, issue the following commands:  
@@ -123,10 +119,10 @@ scala> main(Array(""))
   
 # For ruby script to test the agent
 
-1. go to the directory where the script is in the shell - in data folder.
+1. go to the directory where the script is in the shell (which is in data folder).
 
-2. issue the command in the shell ./simulate.rb \<path-to\>/solution.jar \<path-to\>/grids.data.  
-   (i.e. ./simulate.rb ../target/scala-2.12/solution.jar grids.data)
+2. issue the command in the shell ./simulate.rb \<path-to\>/solution.jar \<path-to\>/grids.data.
+(which is ./simulate.rb ../target/scala-2.13/solution.jar grids.data)
 
 You should see:
 
@@ -136,4 +132,8 @@ y is : 69
 x is : 52
 .....
 
-Or you can inspect the sample run session at data/target/debug.txt.
+
+current position is: #<struct Point x=46, y=106>
+output: The agent seems to have completed the grid. Please start again with a new session. The result is KEEEEEEEEHHIIIIJJMMMMMMNNNNNNNNNNNNNNNNOOPPPPPPPPPPPPQQQQQQQQQQQQQQUUUUUUUUWWXXXXXX
+next position is: #<struct Point x=46, y=106>
+iteration is: 20303

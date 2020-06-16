@@ -1,66 +1,57 @@
 package com.playground.strategy
 
-import Default._
-import cats.Order
-import cats.collections._
-import cats.implicits._
+import zio.clock.Clock
+import zio.console.Console
+import zio.blocking.Blocking
+import com.playground.solution.Config.Config
+import com.playground.solution.Logging.Logging
+import com.playground.solution.{Config, Logging}
+
 import scala.annotation.tailrec
-import eu.timepit.refined.api.Refined
-import scala.collection.immutable.{Map => SMap}
+
 
 object Common {
 
-  case class InProcessResult(nextPos    : Point,
-                             distinct   : AvlSet[Point]   = AvlSet.empty[Point],
-                             targetPos  : Option[Point]   = None,
-                             traceBack  : Dequeue[Point]  = Dequeue.empty[Point],
-                             movement   : String          = "")
+  type Ambience = Console with Clock with Blocking with Config with Logging
+  val ambience  = Config.live ++ Logging.live
 
-  implicit val pointOrder = new Order[Point] {
-    override def compare(x: Point, y: Point): Int = {
-      (x == y) match {
-        case true   => 0
-        case _      =>
-          val result = x.x compare y.x
-          result match {
-            case 0  => x.y compare y.y
-            case _  => result
-          }
-      }
-    }
-  }
+  case class InProcessResult(nextPos  : Point,
+                             distinct : Set[Point],
+                             targetPos: Option[Point],
+                             traceBack: List[Point] = List.empty[Point],
+                             movement: String = "")
 
   case class Point(x: Int, y: Int) {
-    def isLeftOf(that: Point)     : Boolean  = this.x < that.x
-    def isRightOf(that: Point)    : Boolean  = this.x > that.x
-    def isHigherThan(that: Point) : Boolean  = this.y < that.y
-    def isLowerThan(that: Point)  : Boolean  = this.y > that.y
+    def isLeftOf(that: Point): Boolean      = this.x < that.x
+    def isRightOf(that: Point): Boolean     = this.x > that.x
+    def isHigherThan(that: Point): Boolean  = this.y < that.y
+    def isLowerThan(that: Point): Boolean   = this.y > that.y
   }
 
-  case class Env(currentPos   : Point           = Point(0,0),
-                 visited      : AvlSet[Point]   = AvlSet.empty[Point],
-                 unexplored   : AvlSet[Point]   = AvlSet.empty[Point],
-                 traceBack    : Dequeue[Point]  = Dequeue.empty[Point],
-                 result       : Dequeue[Char]   = Dequeue.empty[Char],
-                 targetPos    : Option[Point]   = None,
-                 hasStarted   : Boolean         = false,
-                 movement     : String          = "") {
-    val x                     = currentPos.x
-    val y                     = currentPos.y
-    val top                   = Point(x, y - 1)
-    val bottom                = Point(x, y + 1)
-    val left                  = Point(x - 1, y)
-    val right                 = Point(x + 1, y)
+  case class Env(currentPos   : Point = Point(0,0),
+                 visited      : Set[Point]  = Set.empty[Point],
+                 unexplored   : Set[Point]  = Set.empty[Point],
+                 traceBack    : List[Point] = List.empty[Point],
+                 result       : List[Char]  = List.empty[Char],
+                 targetPos    : Option[Point] = None,
+                 hasStarted   : Boolean   = false,
+                 movement     : String = "") {
+    val x                                 = currentPos.x
+    val y                                 = currentPos.y
+    val top                               = Point(x, y - 1)
+    val bottom                            = Point(x, y + 1)
+    val left                              = Point(x - 1, y)
+    val right                             = Point(x + 1, y)
 
 
-    type Path                 = List[Point]
+    type Path                             = List[Point]
 
     @tailrec
-    private def dijkstra(lookup  : SMap[Point, Path],
-                         fringe  : List[Path],
-                         dest    : Point,
-                         visited : AvlSet[Point]): Path = fringe match {
-      case path :: fringeRest   =>
+    private def dijkstra(lookup  : Map[Point, Path],
+                         fringe    : List[Path],
+                         dest      : Point,
+                         visited   : Set[Point]): Path = fringe match {
+      case path   :: fringeRest =>
         path match {
           case key :: pathRest  =>
             if (key == dest) {
@@ -78,35 +69,34 @@ object Common {
       case Nil                  => List.empty[Point]
     }
 
-    def getPathFromCurrentToTarget: Dequeue[Point]  = {
-      val targets                                   = getTargetNeighbors
-      val lookup                                    = getLookUpMap
-      Dequeue.fromFoldable(
-        dijkstra(lookup, List[Path](List[Point](currentPos)), targets.min.getOrElse(Point(-1,-1)), AvlSet.empty[Point])
-      )
+    def getPathFromCurrentToTarget: List[Point] = {
+      val targets               = getTargetNeighbors
+      val lookup                = getLookUpMap
+      dijkstra(lookup, List[Path](List[Point](currentPos)), targets.head, Set.empty[Point])
     }
 
     def isNeighbor(point: Point): Boolean = point == top || point == left  || point == right || point == bottom
-    def getNeighbors: AvlSet[Point]       = visited intersect AvlSet(top, bottom, left, right)
-    def getTargetNeighbors: AvlSet[Point] = {
+    def getNeighbors: Set[Point]          = {
+      (visited filter { p => p == top || p == bottom    || p == left || p == right })
+    }
+    def getTargetNeighbors: Set[Point]    = {
       targetPos match {
-        case Some(target) => visited intersect AvlSet(Point(target.x - 1, target.y),
-          Point(target.x + 1, target.y),
-          Point(target.x, target.y - 1),
-          Point(target.x, target.y + 1)
-        )
-        case _            =>  AvlSet.empty[Point]
+        case Some(target) => (visited filter { p => p == Point(target.x - 1, target.y) ||
+            p == Point(target.x + 1, target.y) ||
+            p == Point(target.x, target.y - 1) ||
+            p == Point(target.x, target.y + 1)
+          })
+        case _            =>  Set.empty[Point]
       }
     }
-    def getNeighborsFor(current :Point): AvlSet[Point] = {
-      (visited intersect AvlSet(Point(current.x - 1, current.y),
-        Point(current.x + 1, current.y),
-        Point(current.x, current.y - 1),
-        Point(current.x, current.y + 1))
-      )
+    def getNeighborsFor(current :Point): Set[Point]   = {
+      (visited filter { p => p == Point(current.x - 1, current.y) ||
+        p == Point(current.x + 1, current.y) ||
+        p == Point(current.x, current.y - 1) ||
+        p == Point(current.x, current.y + 1)
+      })
     }
     def surroundedByNewCells: Boolean     = hasNewTop    && hasNewBottom  && hasNewLeft   && hasNewRight
-    def surroundedByOldCells: Boolean     = !surroundedByNewCells
     def hasNewTopBottomRight: Boolean     = hasNewTop    && hasNewBottom  && hasNewRight
     def hasNewTopBottomLeft: Boolean      = hasNewTop    && hasNewBottom  && hasNewLeft
     def hasNewTopBottom: Boolean          = hasNewTop    && hasNewBottom
@@ -135,35 +125,35 @@ object Common {
 
     def distance(p1: Point, p2: Point): Int = Math.abs(p1.x-p2.x) + Math.abs(p1.y-p2.y)
 
-    def getLookUpMap: SMap[Point, Path]   = {
-      visited.foldLeft(SMap.empty[Point, List[Point]])((acc, p) => {
-        acc ++ SMap[Point, Path](p -> getNeighborsFor(p).toList)
+    def getLookUpMap: Map[Point, Path]    = {
+      visited.foldLeft(Map.empty[Point, List[Point]])((acc, p) => {
+        acc ++ Map[Point, Path](p -> getNeighborsFor(p).toList)
       })
     }
   }
 
   val initial                             = Env()
 
-  def isValidInput(c: Char): Boolean      = isLineSeparator(c.toString) || isCapitalLetter(c) || isSpace(c) || isWall(c)
+  def isValidInput(s: String): Boolean    = isLineSeparator(s) || isCapitalLetter(s) || isSpace(s) || isWall(s)
 
-  def isWall(c: Char): Boolean            = c == '#'
+  def isWall(s: String): Boolean          = s.equals("#")
 
-  def isCapitalLetter(c: Char): Boolean   = c.isLetter && c.isUpper
+  def isCapitalLetter(s: String): Boolean = s.matches("^([A-Z])+$")
 
-  def isSpace(c: Char): Boolean           = c == ' '
+  def isSpace(s: String): Boolean         = s.matches("\\s")
 
   val lineSeparator: String               = System.getProperty("line.separator")
 
-  def isLineSeparator(c: String): Boolean = c.equals(lineSeparator)
+  def isLineSeparator(s: String): Boolean = s.equals(lineSeparator)
 
   trait       Cell
   case object Wall                            extends Cell
   case class  CharOrSpace(character: Char)    extends Cell
 
-  def generateCell(c: Char Refined CapitalSpacePound): Cell       = {
-    c.value match {
-      case '#'                            => Wall
-      case c  if isCapitalLetter(c)       => CharOrSpace(c)
+  def generateCell(s: String): Cell = {
+    s match {
+      case "#"                            => Wall
+      case c  if isCapitalLetter(c)       => CharOrSpace(c.charAt(0))
       case sp if isSpace(sp)              => CharOrSpace(' ')
     }
   }

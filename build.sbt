@@ -1,49 +1,65 @@
 
+import sbt.Resolver
 
-import AssemblyKeys._
+name := "PlaygroundZ"
 
-name                := "PlaygroundZ"
+version := "0.1"
 
-version             := "1.0"
+scalaVersion := "2.13.2"
 
-scalaVersion        := "2.12.8"
+lazy val zioVersion                         = "1.0.0-RC20"
+lazy val catsVersion                        = "2.0.0"
+lazy val specsVersion                       = "4.8.2"
+lazy val slf4jVersion                       = "1.7.30"
+lazy val logbackVersion                     = "1.2.3"
+lazy val zioCatsVersion                     = "2.0.0.0-RC10"
+lazy val log4CatsVersion                    = "0.4.0-M1"
+lazy val shapelessVersion                   = "2.3.3"
+lazy val parallelCollectionsVersion         = "0.2.0"
 
-resolvers ++= Seq(
-  "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
-  "opennlp sourceforge repo" at "http://opennlp.sourceforge.net/maven2"
+lazy val commonSettings = Seq(
+  version             := "0.1-SNAPSHOT",
+  organization        := "com.playground",
+  scalaVersion        := "2.13.2",
+  test in assembly    := {},
+  resolvers           ++= Seq(
+    Resolver.sonatypeRepo("releases"),
+    "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
+    "opennlp sourceforge repo" at "http://opennlp.sourceforge.net/maven2"
+  )
 )
 
 libraryDependencies ++= Seq(
-  "org.typelevel"           %% "cats-collections-core"  % "0.7.0",
-  "eu.timepit"              %% "refined"                % "0.9.5",
-  "com.chuusai"             %% "shapeless"              % "2.3.3",
-  "org.specs2"              %% "specs2-core"            % "4.1.0" % "test",
-  "org.scalaz"              %% "scalaz-zio"             % "1.0-RC4",
-  "org.scalaz"              %% "scalaz-zio-streams"     % "1.0-RC4"
+  "org.typelevel"                 %% "cats-core"                              % catsVersion,
+  "com.chuusai"                   %% "shapeless"                              % shapelessVersion,
+  "org.specs2"                    %% "specs2-core"                            % specsVersion % "test",
+  "dev.zio"                       %% "zio"                                    % zioVersion,
+  "dev.zio"                       %% "zio-streams"                            % zioVersion,
+  "dev.zio"                       %% "zio-interop-cats"                       % zioCatsVersion,
+  "org.scala-lang.modules"        %% "scala-parallel-collections"             % parallelCollectionsVersion,
+  "io.chrisdavenport"             %% "log4cats-core"                          % log4CatsVersion,
+  "io.chrisdavenport"             %% "log4cats-slf4j"                         % log4CatsVersion,
+  "org.slf4j"                     % "slf4j-log4j12"                           % slf4jVersion,
+  "org.slf4j"                     % "slf4j-api"                               % slf4jVersion
 )
 
 scalacOptions       ++= Seq(
-  "-feature",
-  "-Ypartial-unification"
+  "-Ywarn-unused:imports",
+  "-Yrangepos"
 )
 
 initialCommands in console :=
-  """import scalaz.zio._
-    |import cats.implicits._
-    |import eu.timepit.refined._
-    |import java.io.IOException
-    |import scalaz.zio.clock.Clock
-    |import eu.timepit.refined.api.Refined
+  """import zio._
+    |import zio.console.{getStrLn, putStrLn}
+    |import com.playground.strategy.Common._
     |import com.playground.strategy.Default._
-    |import scalaz.zio.console.{Console, getStrLn, putStrLn}
-    |import com.playground.strategy.Common.{Env, isCapitalLetter}
   """.stripMargin
 
-jarName   in assembly := "solution.jar"
+assemblyJarName   in assembly := "solution.jar"
 
 mainClass in assembly := Some("com.playground.solution.Main")
 
-mergeStrategy in assembly := {
+assemblyMergeStrategy in assembly := {
   case PathList("META-INF", xs @ _*) => MergeStrategy.discard
   case x => MergeStrategy.first
 }

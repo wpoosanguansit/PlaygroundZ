@@ -1,28 +1,54 @@
 package com.playground.solution
 
-import scalaz.zio.Task
-import scalaz.zio.clock.Clock
-import scalaz.zio.console.Console
+import zio.interop.catz._
 import com.playground.strategy.Common.Env
+import zio.{Has, Layer, Task, ZIO, ZLayer}
+import io.chrisdavenport.log4cats.SelfAwareStructuredLogger
+import io.chrisdavenport.log4cats.slf4j.Slf4jLogger
 
-trait Config extends Serializable {
-  val config: Config.Service
-}
+import scala.reflect.{ClassTag, classTag}
 
-object Config extends Serializable {
-  trait Service extends Serializable {
-    def get: Task[Env]
+
+object Config {
+  trait Service {
+    def env: Task[Env]
     def update(newEnv: Env): Task[Unit]
   }
 
-  trait Live extends Serializable with Config {
-    var env    = Env()
-    val config = new Service {
-      override def get: Task[Env]                   = Task(env)
+  type Config                                           = Has[Config.Service]
 
-      override def update(newEnv: Env): Task[Unit]  = Task.effectTotal { env = newEnv }
+  val live: Layer[Nothing, Config]                      = ZLayer.succeed(
+    new Service {
+      var instance                                      = Env()
+      override def env: Task[Env]                       = Task.effectTotal(instance)
+      override def update(newEnv: Env): Task[Unit]      = Task.effectTotal { instance = newEnv }
     }
+  )
+
+  //accessor methods
+  def env: ZIO[Config, Throwable, Env]                  = ZIO.accessM(_.get.env)
+  def update(newEnv: Env): ZIO[Config, Throwable,Unit]  = ZIO.accessM(_.get.update(newEnv))
+}
+
+object Logging {
+  trait Service {
+    def getLogger[T: ClassTag]: Task[SelfAwareStructuredLogger[Task]]
   }
 
-  object Live extends Live with Console.Live with Clock.Live
+  type Logging                                                  = Has[Logging.Service]
+  val cache                                                     = scala.collection.mutable.Map.empty[Class[_], Task[SelfAwareStructuredLogger[Task]]]
+  val live: Layer[Nothing, Logging]                             = ZLayer.fromFunction(_ =>
+    new Service {
+      def getLogger[T: ClassTag]: Task[SelfAwareStructuredLogger[Task]]   = {
+        val runtimeClass                              = classTag[T].runtimeClass
+        cache.getOrElseUpdate(runtimeClass, Slf4jLogger.fromClass[Task](runtimeClass))
+      }
+    }
+  )
+
+  def logger[T: ClassTag]: ZIO[Logging, Throwable, SelfAwareStructuredLogger[Task]] = {
+    (for {
+      logger    <- ZIO.accessM[Logging](_.get.getLogger[T])
+    } yield logger)
+  }
 }
