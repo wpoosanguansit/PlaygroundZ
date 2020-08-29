@@ -1,218 +1,203 @@
 package com.playground.strategy
 
-import java.io.IOException
-
-import shapeless.{::, HList, HNil}
+import zio.ZIO
 import Common._
-import zio._
-import zio.console._
+import cats.implicits._
+import cats.collections._
+import zio.console.Console
+import shapeless.{ ::, HList, HNil }
+import eu.timepit.refined.cats.CatsRefinedTypeOpsSyntax
+import eu.timepit.refined.api.{ Refined, RefinedTypeOps, Validate }
 
 object Default {
 
-  def processInputsZ(currentCell: String,
-                     upCell: String,
-                     downCell: String,
-                     leftCell: String,
-                     rightCell: String)(env: Env): ZIO[Console, IOException, Env] = {
-    val cells: HList = (generateCell(currentCell) ::
-      generateCell(upCell)                        ::
-      generateCell(downCell)                      ::
-      generateCell(leftCell)                      ::
-      generateCell(rightCell)                     ::
-      HNil)
-    val x = env.currentPos.x
-    val y = env.currentPos.y
-    val top = Point(x, y - 1)
-    val bottom = Point(x, y + 1)
-    val left = Point(x - 1, y)
-    val right = Point(x + 1, y)
+  final case class Capital()
+  final case class CapitalSpace()
+  final case class CapitalSpacePound()
+
+  type CharCapital           = Char Refined Capital
+  type CharCapitalSpace      = Char Refined CapitalSpace
+  type CharCapitalSpacePound = Char Refined CapitalSpacePound
+
+  object CharCapital      extends RefinedTypeOps[CharCapital, Char] with CatsRefinedTypeOpsSyntax
+  object CharCapitalSpace extends RefinedTypeOps[CharCapitalSpace, Char] with CatsRefinedTypeOpsSyntax
+
+  object CapitalSpacePound {
+    implicit def charCapitalSpacePoundValidate: Validate.Plain[Char, CapitalSpacePound] =
+      Validate.fromPredicate(
+        (char: Char) => (char.isUpper && char.isLetter) || char == '#' || char.isSpaceChar,
+        (char: Char) => s"isCapitalSpacePound('$char')",
+        CapitalSpacePound())
+  }
+
+  object CapitalSpace      {
+    implicit def charCapitalSpaceValidate: Validate.Plain[Char, CapitalSpace] =
+      Validate.fromPredicate(
+        (char: Char) => (char.isUpper && char.isLetter) || char.isSpaceChar,
+        (char: Char) => s"isCapitalSpace('$char')",
+        CapitalSpace())
+  }
+
+  object Capital           {
+    implicit def charCapitalValidate: Validate.Plain[Char, Capital] =
+      Validate.fromPredicate((char: Char) => char.isUpper && char.isLetter && !char.isSpaceChar, (char: Char) => s"isCapital('$char')", Capital())
+  }
+
+  def processInputsZ(
+      currentCell: CharCapitalSpacePound,
+      upCell: CharCapitalSpacePound,
+      downCell: CharCapitalSpacePound,
+      leftCell: CharCapitalSpacePound,
+      rightCell: CharCapitalSpacePound
+    )(env: Env): ZIO[Console, Throwable, Env] = {
+    val cells: HList = generateCell(currentCell).select[CharOrSpace].getOrElse(Wall) ::
+      generateCell(upCell).select[CharOrSpace].getOrElse(Wall)    ::
+      generateCell(downCell).select[CharOrSpace].getOrElse(Wall)  ::
+      generateCell(leftCell).select[CharOrSpace].getOrElse(Wall)  ::
+      generateCell(rightCell).select[CharOrSpace].getOrElse(Wall) ::
+      HNil
+    val x: Int                    = env.currentPos.x
+    val y: Int                    = env.currentPos.y
+    val top: Point                = Point(x, y - 1)
+    val bottom: Point             = Point(x, y + 1)
+    val left: Point               = Point(x - 1, y)
+    val right: Point              = Point(x + 1, y)
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Process the current
     ///////////////////////////////////////////////////////////////////////////////////////////////
-    val preprocessed: Env = {
-      val currentPos = env.currentPos
-      val unexplored = (env.unexplored - env.currentPos)
-      val isNewCell = !env.visited.toList.contains(currentPos)
-      val result = if (isNewCell && isCapitalLetter(currentCell)) {
-        (env.result ++ List[Char](currentCell.charAt(0)))
+    val preprocessed: Env         = {
+      val currentPos: Point               = env.currentPos
+      val unexplored: AvlSet[Point]       = env.unexplored remove env.currentPos
+      val isNewCell: Boolean              = !env.visited.contains(currentPos)
+      val isNotSpace: Boolean             = !isSpace(currentCell)
+      val result: Dequeue[CharCapital]    = if (isNewCell && isNotSpace) {
+        env.result cons CharCapital.unsafeFrom(currentCell.value)
       } else {
         env.result
       }
-      val visited = env.visited + currentPos
-      val minTarget = if (!env.unexplored.isEmpty) unexplored map {
-        env.distance(env.currentPos, _)
+      val visited: AvlSet[Point]          = env.visited add currentPos
+      val minTarget: AvlSet[(Int, Point)] = unexplored map { (point: Point) => (env.distance(currentPos, point), point) }
+      val targetPos: Option[Point]        = minTarget.min.map(_._2)
+      if (env.hasReachedTarget) {
+        env.copy(
+          visited    = visited,
+          result     = result,
+          unexplored = unexplored,
+          traceBack  = Dequeue.empty[Point],
+          targetPos  = targetPos,
+          hasStarted = true)
       } else {
-        Set.empty[Int]
-      }
-      val targetPos = if (!minTarget.isEmpty) {
-        val minTargetIndex = minTarget.zipWithIndex.minBy(_._1)._2
-        Option(unexplored.toList(minTargetIndex))
-      } else {
-        None
-      }
-      (env.hasReachedTarget, env.hasNewCurrent) match {
-        case (true, true) =>
-          env.copy(
-            visited       = visited,
-            result        = result,
-            unexplored    = unexplored,
-            traceBack     = List.empty[Point],
-            targetPos     = targetPos,
-            hasStarted    = true
-          )
-        case (true, false) =>
-          env.copy(
-            visited       = visited,
-            result        = result,
-            unexplored    = unexplored,
-            traceBack     = List.empty[Point],
-            targetPos     = targetPos,
-            hasStarted    = true
-          )
-        case (false, true) =>
-          env.copy(
-            visited       = visited,
-            result        = result,
-            unexplored    = unexplored,
-            hasStarted    = true
-          )
-        case (false, false) =>
-          env.copy(
-            visited       = visited,
-            result        = result,
-            unexplored    = unexplored,
-            hasStarted    = true
-          )
+        env.copy(visited = visited, result = result, unexplored = unexplored, traceBack = env.traceBack snoc currentPos, hasStarted = true)
       }
     }
     //////////////////////////////////////////////////////////////////////////////////////////////
     // We greedily move to the unoccupied cell right -> left and build up the unexplored.
     //////////////////////////////////////////////////////////////////////////////////////////////
-    val unexplored        = preprocessed.unexplored
-    val visited           = preprocessed.visited
-    val result: InProcessResult = cells match {
-      case CharOrSpace(c) :: CharOrSpace(c1) :: CharOrSpace(c2) :: CharOrSpace(c3) :: CharOrSpace(c4) :: HNil
-        if (env.surroundedByNewCells) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](top, bottom, left, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: CharOrSpace(c2) :: _ :: CharOrSpace(c3) :: HNil
-        if (env.hasNewTopBottomRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](top, bottom, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: _ :: CharOrSpace(c2) :: CharOrSpace(c3) :: HNil
-        if (env.hasNewTopLeftRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](top, left, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: _ :: _ :: CharOrSpace(c3) :: HNil
-        if (env.hasNewTopRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](top, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: _ :: CharOrSpace(c1) :: CharOrSpace(c2) :: CharOrSpace(c3) :: HNil
-        if (env.hasNewBottomLeftRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](bottom, left, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: _ :: CharOrSpace(c1) :: _ :: CharOrSpace(c3) :: HNil
-        if (env.hasNewBottomRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](bottom, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: _ :: _ :: CharOrSpace(c3) :: CharOrSpace(c4) :: HNil
-        if (env.hasNewLeftRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](left, right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: _ :: _ :: _ :: CharOrSpace(c4) :: HNil
-        if (env.hasNewRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: CharOrSpace(c2) :: CharOrSpace(c3) :: _ :: HNil
-        if (env.hasNewTopBottomLeft) =>
-        val nextPos = left
-        val distinct = (unexplored ++ Set[Point](top, bottom, left)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "L")
-      case CharOrSpace(c) :: _ :: CharOrSpace(c2) :: CharOrSpace(c3) :: _ :: HNil
-        if (env.hasNewBottomLeft) =>
-        val nextPos = left
-        val distinct = (unexplored ++ Set[Point](bottom, left)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "L")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: _ :: CharOrSpace(c3) :: _ :: HNil
-        if (env.hasNewTopLeft) =>
-        val nextPos = left
-        val distinct = (unexplored ++ Set[Point](top, left)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "L")
-      case CharOrSpace(c) :: _ :: _ :: CharOrSpace(c3) :: _ :: HNil
-        if (env.hasNewLeft) =>
-        val nextPos = left
-        val distinct = (unexplored ++ Set[Point](left)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "L")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: CharOrSpace(c2) :: _ :: _ :: HNil
-        if (env.hasNewTopBottom) =>
-        val nextPos = top
-        val distinct = (unexplored ++ Set[Point](top, bottom)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "U")
-      case CharOrSpace(c) :: CharOrSpace(c1) :: _ :: _ :: _ :: HNil
-        if (env.hasNewTop) =>
-        val nextPos = top
-        val distinct = (unexplored ++ Set[Point](top)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "U")
-      case CharOrSpace(c) :: _ :: CharOrSpace(c1) :: _ :: _ :: HNil
-        if (env.hasNewBottom) =>
-        val nextPos = bottom
-        val distinct = (unexplored ++ Set[Point](bottom)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "D")
+    val unexplored: AvlSet[Point] = preprocessed.unexplored
+    val visited: AvlSet[Point]    = preprocessed.visited
+    val traceBack: Dequeue[Point] = preprocessed.traceBack
+    val result: InProcessResult   = cells match {
+      case CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: HNil if env.surroundedByNewCells =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, bottom, left, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: _ :: CharOrSpace(_) :: HNil if env.hasNewTopBottomRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, bottom, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: CharOrSpace(_) :: _ :: CharOrSpace(_) :: CharOrSpace(_) :: HNil if env.hasNewTopLeftRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, left, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: CharOrSpace(_) :: _ :: _ :: CharOrSpace(_) :: HNil if env.hasNewTopRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: _ :: CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: HNil if env.hasNewBottomLeftRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](bottom, left, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: _ :: CharOrSpace(_) :: _ :: CharOrSpace(_) :: HNil if env.hasNewBottomRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](bottom, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: _ :: _ :: CharOrSpace(_) :: CharOrSpace(_) :: HNil if env.hasNewLeftRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](left, right)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: _ :: _ :: _ :: CharOrSpace(_) :: HNil if env.hasNewRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored + right) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
+      case CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: _ :: HNil if env.hasNewTopBottomLeft =>
+        val nextPos: Point          = left
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, bottom, left)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "L")
+      case CharOrSpace(_) :: _ :: CharOrSpace(_) :: CharOrSpace(_) :: _ :: HNil if env.hasNewBottomLeft =>
+        val nextPos: Point          = left
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](bottom, left)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "L")
+      case CharOrSpace(_) :: CharOrSpace(_) :: _ :: CharOrSpace(_) :: _ :: HNil if env.hasNewTopLeft =>
+        val nextPos: Point          = left
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, left)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "L")
+      case CharOrSpace(_) :: _ :: _ :: CharOrSpace(_) :: _ :: HNil if env.hasNewLeft =>
+        val nextPos: Point          = left
+        val distinct: AvlSet[Point] = (unexplored + left) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "L")
+      case CharOrSpace(_) :: CharOrSpace(_) :: CharOrSpace(_) :: _ :: _ :: HNil if env.hasNewTopBottom =>
+        val nextPos: Point          = top
+        val distinct: AvlSet[Point] = (unexplored ++ AvlSet[Point](top, bottom)) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "U")
+      case CharOrSpace(_) :: CharOrSpace(_) :: _ :: _ :: _ :: HNil if env.hasNewTop =>
+        val nextPos: Point          = top
+        val distinct: AvlSet[Point] = (unexplored + top) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "U")
+      case CharOrSpace(_) :: _ :: CharOrSpace(_) :: _ :: _ :: HNil if env.hasNewBottom =>
+        val nextPos: Point          = bottom
+        val distinct: AvlSet[Point] = (unexplored + bottom) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "D")
       //////////////////////////////////////////////////////////////////////////////////////////////
       // We move to target if it is next to the current cell
       //////////////////////////////////////////////////////////////////////////////////////////////
-      case CharOrSpace(c) :: CharOrSpace(c1) :: _ :: _ :: _ :: HNil
-        if (env.targetIsToTop) =>
-        val nextPos = top
-        val distinct = (unexplored ++ Set[Point](top)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "U")
-      case CharOrSpace(c) :: _ :: CharOrSpace(c1) :: _ :: _ :: HNil
-        if (env.targetIsToBottom) =>
-        val nextPos = bottom
-        val distinct = (unexplored ++ Set[Point](bottom)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "D")
-      case CharOrSpace(c) :: _ :: _ :: CharOrSpace(c1) :: _ :: HNil
-        if (env.targetIsToLeft) =>
-        val nextPos = left
-        val distinct = (unexplored ++ Set[Point](left)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "L")
-      case CharOrSpace(c) :: _ :: _ :: _ :: CharOrSpace(c1) :: HNil
-        if (env.targetIsToRight) =>
-        val nextPos = right
-        val distinct = (unexplored ++ Set[Point](right)) diff visited
-        InProcessResult(nextPos, distinct, Option(nextPos), env.traceBack :+ env.currentPos, "R")
+      case CharOrSpace(_) :: CharOrSpace(_) :: _ :: _ :: _ :: HNil if env.targetIsToTop =>
+        val nextPos: Point          = top
+        val distinct: AvlSet[Point] = (unexplored + top) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "U")
+      case CharOrSpace(_) :: _ :: CharOrSpace(_) :: _ :: _ :: HNil if env.targetIsToBottom =>
+        val nextPos: Point          = bottom
+        val distinct: AvlSet[Point] = (unexplored + bottom) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "D")
+      case CharOrSpace(_) :: _ :: _ :: CharOrSpace(_) :: _ :: HNil if env.targetIsToLeft =>
+        val nextPos: Point          = left
+        val distinct: AvlSet[Point] = (unexplored + left) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "L")
+      case CharOrSpace(_) :: _ :: _ :: _ :: CharOrSpace(_) :: HNil if env.targetIsToRight =>
+        val nextPos: Point          = right
+        val distinct: AvlSet[Point] = (unexplored + right) diff visited
+        InProcessResult(nextPos, distinct, Option[Point](nextPos), traceBack, "R")
       //////////////////////////////////////////////////////////////////////////////////////////////
       // it has exhausted the cells around.  there is no new cell. we start to move towards
       // targetPos. We take all of the visited out of the unexplored as we go til it is
       // exhausted.
       //////////////////////////////////////////////////////////////////////////////////////////////
-      case CharOrSpace(c) :: _ :: _ :: _ :: _ :: HNil =>
+      case CharOrSpace(_) :: _ :: _ :: _ :: _ :: HNil =>
         findPathZ(preprocessed)
       case _ =>
-        InProcessResult(env.currentPos, unexplored, env.targetPos, env.traceBack :+ env.currentPos, "This is invalid state. It should not have happened. No movement.")
+        InProcessResult(env.currentPos, unexplored, env.targetPos, traceBack, "This is invalid state. It should not have happened. No movement.")
     }
     //////////////////////////////////////////////////////////////////////////////////////////////
     // we now processed and return.
     //////////////////////////////////////////////////////////////////////////////////////////////
-    ZIO.succeed(preprocessed.copy(
-      currentPos  = result.nextPos,
-      unexplored  = result.distinct,
-      targetPos   = result.targetPos,
-      traceBack   = result.traceBack,
-      movement    = result.movement))
+    ZIO.succeed(
+      preprocessed.copy(
+        currentPos = result.nextPos,
+        unexplored = result.distinct,
+        targetPos  = result.targetPos,
+        traceBack  = result.traceBack,
+        movement   = result.movement))
   }
 
-  //////////////////////////////////////////////////////////////////////////////////////////////
-  // We just find our way back to the targetPos
-  //////////////////////////////////////////////////////////////////////////////////////////////
   private def movement(nextPos: Point, currentPos: Point): String = {
     if (nextPos isHigherThan currentPos) {
       "U"
@@ -226,32 +211,40 @@ object Default {
       "This should not happen. nextPos is the same as currentPos"
     }
   }
+  //////////////////////////////////////////////////////////////////////////////////////////////
+  // We just find our way back to the targetPos
+  //////////////////////////////////////////////////////////////////////////////////////////////
   def findPathZ(env: Env): InProcessResult = {
-    val currentPos          = env.currentPos
-    val neighbors           = env.getNeighbors
-    val targetPos           = env.targetPos
-    val unexplored          = env.unexplored
+    val currentPos: Point         = env.currentPos
+    val neighbors: AvlSet[Point]  = env.getNeighbors
+    val targetPos: Option[Point]  = env.targetPos
+    val unexplored: AvlSet[Point] = env.unexplored
+    val visited: AvlSet[Point]    = env.visited
+    val traceBack: Dequeue[Point] = env.traceBack
     targetPos match {
-      case Some(target)     => {
-        val steps = env.traceBack match {
-          case Nil          => env.getPathFromCurrentToTarget
-          case _            => env.traceBack
+      case Some(target) =>
+        val steps: Dequeue[Point]            = if (traceBack.nonEmpty) env.traceBack else env.getPathFromCurrentToTarget
+        val next: Dequeue[Point]             = steps.collectFold[Dequeue[Point]]((point: Point) => {
+          if (!env.isNeighbor(point)) Dequeue.empty[Point] else Dequeue[Point](point)
+        })
+        val nextPos: Point                   = next.backOption match {
+          case None                           => (neighbors intersect visited).min.getOrElse(currentPos)
+          case _ if neighbors contains target => target
+          case Some(point)                    => point
         }
-        val next: List[Point] = steps filter { env.isNeighbor(_) }
-        val nextPos         = next match {
-          case Nil          => env.visited.filter(env.isNeighbor(_)).headOption.getOrElse(currentPos)
-          case _ if (neighbors.toList contains target) => target
-          case _            => next.head
-        }
-        val traceBack       = steps.dropWhile(p => p == nextPos || p == currentPos)
-        InProcessResult(nextPos, unexplored, targetPos, traceBack, movement(nextPos, currentPos))
-      }
-      case _                => {
-        val nextPos         = (neighbors intersect env.visited).headOption.getOrElse(neighbors.headOption.getOrElse(currentPos))
-        val targetPos       = unexplored.headOption
-        val traceBack       = env.traceBack.dropWhile(p => p == nextPos || p == currentPos)
-        InProcessResult(nextPos, unexplored, targetPos, traceBack, movement(nextPos, currentPos))
-      }
+        val updatedTraceBack: Dequeue[Point] = steps.collectFold[Dequeue[Point]]((point: Point) => {
+          if (point == nextPos || point == currentPos) Dequeue.empty[Point] else Dequeue[Point](point)
+        })
+        InProcessResult(nextPos, unexplored, targetPos, updatedTraceBack, movement(nextPos, currentPos))
+      case _            =>
+        val nextPos: Point                   =
+          (neighbors intersect visited).min.getOrElse(neighbors.min.getOrElse(currentPos))
+        val minTarget: AvlSet[(Int, Point)]  = unexplored map { (point: Point) => (env.distance(env.currentPos, point), point) }
+        val updatedTargetPos: Option[Point]  = minTarget.min.map(_._2)
+        val updatedTraceBack: Dequeue[Point] = traceBack.collectFold[Dequeue[Point]]((point: Point) => {
+          if (point == nextPos || point == currentPos) Dequeue.empty[Point] else Dequeue[Point](point)
+        })
+        InProcessResult(nextPos, unexplored, updatedTargetPos, updatedTraceBack, movement(nextPos, currentPos))
     }
   }
 }

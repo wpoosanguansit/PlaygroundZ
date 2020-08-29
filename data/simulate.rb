@@ -82,10 +82,16 @@ begin
 			puts "string input is : |" << input << "|"
 			stdin.print input
 			stdin.print "\n"
-			line 		= stdout.gets.chomp
+			nei         = stdout.gets
+			nei         ||= ''
+			line 		= nei.chomp
 			puts "current position is: " << current.to_s
 			puts "output: #{line}"
-			if line.include?("The agent seems to have completed the grid")
+			if line.include?("A checked error was not handled") || line.include?("IllegalArgumentException") || line.include?("Error") || line.include?("Fiber failed")
+			    puts "Error: some of the inputs are not valid - # or Capital Letter or Space."
+			    puts "Please restart your game with valid input - 5 characters of # or Capital Letter or Space."
+			    done    = 1
+			elsif line.include?("The agent seems to have completed the grid")
 				done 	= 1
 			elsif line.eql?("U")
 				current = Point.new(current.x, current.y - 1)
